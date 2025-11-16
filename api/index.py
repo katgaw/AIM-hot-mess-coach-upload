@@ -75,9 +75,6 @@ def chat(
                 else:
                     uploaded_content = raw_bytes.decode("utf-8", errors="ignore")
                 
-                # Save the uploaded content to a temporary file
-                with open("/tmp/document.txt", "w", encoding="utf-8") as f:
-                    f.write(uploaded_content or "")
 
             elif (filename.endswith(".pdf") or "application/pdf" in content_type):
                 if PdfReader is not None:
@@ -107,6 +104,15 @@ def chat(
 
     coach_reply = get_coach_reply(user_message, uploaded_content)
 
+    save_form = ""
+    if uploaded_content:
+        save_form = """
+            <form action="/save" method="post">
+                <textarea name="content" style="display:none;">{}</textarea>
+                <button type="submit">Save uploaded content</button>
+            </form>
+        """.format(uploaded_content)
+
     return f"""
     <div style="display: flex; align-items: flex-start; gap: 16px;">
         <img src="/static/mental_image.png" alt="Hot Mess Coach" style="max-width: 160px; height: auto;" />
@@ -116,11 +122,30 @@ def chat(
                 {coach_reply}
             </div>
             {"<p><i>Document context was included.</i></p>" if uploaded_content else ""}
+            {save_form}
             <br><a href="/">⬅ Back</a>
         </div>
     </div>
     """
 
+@app.post("/save", response_class=HTMLResponse)
+def save(content: str = Form(...)):
+    try:
+        with open("/tmp/document.txt", "w", encoding="utf-8") as f:
+            f.write(content or "")
+        message = "Saved uploaded content to /tmp/document.txt"
+    except Exception as e:
+        message = f"Save failed: {e}"
+    return f"""
+    <div style="display: flex; align-items: flex-start; gap: 16px;">
+        <img src="/static/mental_image.png" alt="Hot Mess Coach" style="max-width: 160px; height: auto;" />
+        <div style="flex: 1;">
+            <h2>🔥 Hot Mess Coach</h2>
+            <p>{message}</p>
+            <br><a href="/">⬅ Back</a>
+        </div>
+    </div>
+    """
 def get_coach_reply(user_message: str, uploaded_content: Optional[str] = None) -> str:
     if not OPENAI_API_KEY:
         return "Missing OPENAI_API_KEY. Set it in your environment."
