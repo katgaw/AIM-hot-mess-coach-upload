@@ -1,10 +1,17 @@
 from fastapi import FastAPI, Form, UploadFile, File
 from fastapi.responses import HTMLResponse
-from openai import OpenAI
-from dotenv import load_dotenv
 import os
+import json
+from urllib import request as urlrequest, error as urlerror
 from typing import Optional
 from io import BytesIO
+
+# Load .env locally if available; Vercel uses project env vars
+try:
+    from dotenv import load_dotenv  # type: ignore
+    load_dotenv()
+except Exception:
+    pass
 
 try:
     from PyPDF2 import PdfReader  # type: ignore[import-not-found]
@@ -16,9 +23,7 @@ try:
 except Exception:
     pd = None
 
-load_dotenv()
-
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 app = FastAPI()
 
@@ -86,19 +91,7 @@ def chat(
     if uploaded_content:
         uploaded_content = uploaded_content[:8000]
 
-    system_prompt = "You are a supportive mental coach who helps overwhelmed people feel calmer."
-    if uploaded_content:
-        system_prompt += "\n\nThe user has also uploaded a document. Here is the content:\n" + uploaded_content
-
-    response = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_message},
-        ]
-    )
-
-    coach_reply = response.choices[0].message.content
+    coach_reply = get_coach_reply(user_message, uploaded_content)
 
     return f"""
     <h2>🔥 Hot Mess Coach Says</h2>
@@ -108,5 +101,44 @@ def chat(
     {"<p><i>Document context was included.</i></p>" if uploaded_content else ""}
     <br><a href="/">⬅ Back</a>
     """
+
+def get_coach_reply(user_message: str, uploaded_content: Optional[str] = None) -> str:
+    if not OPENAI_API_KEY:
+        return "Missing OPENAI_API_KEY. Set it in your environment."
+
+    system_prompt = "You are a supportive mental coach who helps overwhelmed people feel calmer."
+    if uploaded_content:
+        system_prompt += "\n\nThe user has also uploaded a document. Here is the content:\n" + uploaded_content
+
+    payload = {
+        "model": "gpt-4o-mini",
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_message},
+        ],
+    }
+
+    req = urlrequest.Request(
+        "https://api.openai.com/v1/chat/completions",
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {OPENAI_API_KEY}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+
+    try:
+        with urlrequest.urlopen(req, timeout=30) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            return data["choices"][0]["message"]["content"]
+    except urlerror.HTTPError as e:
+        try:
+            body = e.read().decode("utf-8")
+        except Exception:
+            body = str(e)
+        return f"OpenAI API error: {e.code} {e.reason}\n{body}"
+    except Exception as e:
+        return f"Request failed: {e}"
 
 #uvicorn backend.test_llm:app --reload --host 0.0.0.0 --port 8000
